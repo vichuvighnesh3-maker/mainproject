@@ -1,0 +1,146 @@
+#include <WiFi.h>
+#include <WebServer.h>
+#include <HTTPClient.h>
+
+const char* portalSSID = "EmergencyNode-1";
+const char* portalPassword = "emergency123";
+
+// These must match the Node 2 centre settings.
+const char* centreSSID = "EmergencyCentre";
+const char* centrePassword = "centre123";
+const char* centreURL = "http://192.168.4.1/receive";
+
+WebServer server(80);
+
+String urlEncode(const String& text) {
+  String encoded = "";
+
+  for (size_t i = 0; i < text.length(); i++) {
+    char c = text[i];
+
+    if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+      encoded += c;
+    } else if (c == ' ') {
+      encoded += '+';
+    } else {
+      char buffer[4];
+      sprintf(buffer, "%%%02X", (unsigned char)c);
+      encoded += buffer;
+    }
+  }
+
+  return encoded;
+}
+
+String portalPage(String notice = "") {
+  return R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Emergency Node 1</title>
+  <style>
+    body { font-family: Arial; max-width: 600px; margin: 30px auto; padding: 15px; }
+    h2 { color: #b71c1c; }
+    input, textarea, button { width: 100%; box-sizing: border-box; padding: 12px; margin: 8px 0; font-size: 16px; }
+    button { background: #c62828; color: white; border: 0; font-weight: bold; }
+    .notice { background: #e8f5e9; padding: 12px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h2>Emergency Communication — Node 1</h2>
+  <p>Write your message. It will be sent to the emergency centre.</p>
+  <div class="notice">)rawliteral" + notice + R"rawliteral(</div>
+
+  <form action="/send" method="post">
+    <input name="name" placeholder="Your name (optional)">
+    <textarea name="message" rows="5" placeholder="Write your emergency message" required></textarea>
+    <button type="submit">Send Emergency Message</button>
+  </form>
+</body>
+</html>
+)rawliteral";
+}
+
+void showPortal() {
+  String linkStatus = WiFi.status() == WL_CONNECTED
+    ? "Connected to centre."
+    : "Waiting for connection to centre.";
+  server.send(200, "text/html", portalPage(linkStatus));
+}
+
+void sendMessage() {
+  String name = server.arg("name");
+  String message = server.arg("message");
+
+  if (WiFi.status() != WL_CONNECTED) {
+    server.send(200, "text/html",
+      portalPage("Message not sent yet: Node 1 cannot reach the centre."));
+    return;
+  }
+
+  HTTPClient http;
+  http.begin(centreURL);
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+  String data = "name=" + urlEncode(name) + "&message=" + urlEncode(message);
+  int responseCode = http.POST(data);
+  http.end();
+
+  if (responseCode == 200) {
+    Serial.println("Message forwarded successfully to Node 2");
+    server.send(200, "text/html",
+      portalPage("Success: your message reached the emergency centre."));
+  } else {
+    Serial.println("Forwarding failed");
+    server.send(200, "text/html",
+      portalPage("Message could not reach the centre. Please try again."));
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  // Node 1 gives phones a different network: 192.168.5.1
+  IPAddress portalIP(192, 168, 5, 1);
+  IPAddress gateway(192, 168, 5, 1);
+  IPAddress subnet(255, 255, 255, 0);
+
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.softAPConfig(portalIP, gateway, subnet);
+  WiFi.softAP(portalSSID, portalPassword);
+
+  // Node 1 joins Node 2's Wi-Fi in the background.
+  WiFi.begin(centreSSID, centrePassword);
+
+  Serial.println("\nNode 1 portal started");
+  Serial.println("Phone portal: http://192.168.5.1");
+  Serial.println("Connecting Node 1 to Node 2 centre...");
+
+  unsigned long startTime = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - startTime < 15000) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nConnected to Node 2 centre.");
+    Serial.print("Node 1 centre-link IP: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\nCentre connection not ready yet.");
+  }
+
+  server.on("/", HTTP_GET, showPortal);
+  server.on("/send", HTTP_POST, sendMessage);
+  server.begin();
+}
+
+void loop() {
+  // Reconnect automatically if the centre was temporarily unavailable.
+  if (WiFi.status() != WL_CONNECTED) {
+    WiFi.begin(centreSSID, centrePassword);
+  }
+
+  server.handleClient();
+}

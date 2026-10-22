@@ -137,10 +137,16 @@ void setup() {
 }
 
 void loop() {
-  // Reconnect automatically if the centre was temporarily unavailable.
-  if (WiFi.status() != WL_CONNECTED) {
+  static unsigned long lastReconnectAttempt = 0;
+
+  if (WiFi.status() != WL_CONNECTED &&
+      millis() - lastReconnectAttempt > 10000) {
+
+    lastReconnectAttempt = millis();
+    Serial.println("Trying to reconnect to centre...");
     WiFi.begin(centreSSID, centrePassword);
   }
 
   server.handleClient();
+}
 }

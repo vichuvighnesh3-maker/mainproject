@@ -1,0 +1,83 @@
+#include <WiFi.h>
+#include <WebServer.h>
+
+const char* centreSSID = "EmergencyCentre";
+const char* centrePassword = "centre123";
+
+WebServer server(80);
+String receivedMessages = "";
+int messageCount = 0;
+
+String htmlEscape(String text) {
+  text.replace("&", "&amp;");
+  text.replace("<", "&lt;");
+  text.replace(">", "&gt;");
+  text.replace("\"", "&quot;");
+  return text;
+}
+
+String dashboardPage() {
+  return R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="5">
+  <title>Emergency Centre</title>
+  <style>
+    body { font-family: Arial; max-width: 700px; margin: 25px auto; padding: 15px; }
+    h1 { color: #b71c1c; }
+    .status { background: #e8f5e9; padding: 12px; border-radius: 6px; }
+    .messages { background: #f1f1f1; padding: 15px; white-space: pre-wrap; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Emergency Centre — Node 2</h1>
+  <div class="status">
+    <b>Centre Wi-Fi:</b> EmergencyCentre<br>
+    <b>Messages received:</b> )rawliteral" + String(messageCount) + R"rawliteral(
+  </div>
+  <h2>Received messages</h2>
+  <div class="messages">)rawliteral" + receivedMessages + R"rawliteral(</div>
+  <p>This page refreshes every 5 seconds.</p>
+</body>
+</html>
+)rawliteral";
+}
+
+void showDashboard() {
+  server.send(200, "text/html", dashboardPage());
+}
+
+void receiveFromNode1() {
+  String name = htmlEscape(server.arg("name"));
+  String message = htmlEscape(server.arg("message"));
+
+  messageCount++;
+  receivedMessages += "MESSAGE #" + String(messageCount) + "\n";
+  receivedMessages += "From: " + name + "\n";
+  receivedMessages += "Text: " + message + "\n";
+  receivedMessages += "Status: Received at Node 2 centre\n\n";
+
+  Serial.println("New message received from Node 1");
+  server.send(200, "text/plain", "OK");
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(centreSSID, centrePassword);
+
+  Serial.println("\nNode 2 centre started");
+  Serial.print("Centre dashboard: http://");
+  Serial.println(WiFi.softAPIP());
+
+  server.on("/", HTTP_GET, showDashboard);
+  server.on("/receive", HTTP_POST, receiveFromNode1);
+  server.begin();
+}
+
+void loop() {
+  server.handleClient();
+}

@@ -1,0 +1,75 @@
+#include <WiFi.h>
+#include <WebServer.h>
+
+const char* wifiName = "EmergencyNode-1";
+const char* wifiPassword = "emergency123";
+
+WebServer server(80);
+String queuedMessages = "";
+
+String page() {
+  return R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Emergency Node</title>
+  <style>
+    body { font-family: Arial; max-width: 600px; margin: 30px auto; padding: 15px; }
+    input, textarea, button { width: 100%; box-sizing: border-box; padding: 12px; margin: 8px 0; font-size: 16px; }
+    button { background: #c62828; color: white; border: 0; font-weight: bold; }
+    .queued { background: #eee; padding: 12px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h2>Emergency Communication</h2>
+  <p>You are connected to this emergency node.</p>
+
+  <form action="/send" method="post">
+    <input name="name" placeholder="Your name (optional)">
+    <textarea name="message" rows="5" placeholder="Write your emergency message" required></textarea>
+    <button type="submit">Queue Message</button>
+  </form>
+
+  <h3>Messages waiting to send</h3>
+  <div class="queued">)rawliteral" + queuedMessages + R"rawliteral(</div>
+</body>
+</html>
+)rawliteral";
+}
+
+void showHome() {
+  server.send(200, "text/html", page());
+}
+
+void receiveMessage() {
+  String name = server.arg("name");
+  String message = server.arg("message");
+
+  queuedMessages += "From: " + name + "\n";
+  queuedMessages += "Message: " + message + "\n";
+  queuedMessages += "Status: Queued for LoRa delivery\n\n";
+
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  WiFi.softAP(wifiName, wifiPassword);
+
+  Serial.println("Emergency node started");
+  Serial.print("Connect to Wi-Fi: ");
+  Serial.println(wifiName);
+  Serial.print("Open this address: http://");
+  Serial.println(WiFi.softAPIP());
+
+  server.on("/", HTTP_GET, showHome);
+  server.on("/send", HTTP_POST, receiveMessage);
+  server.begin();
+}
+
+void loop() {
+  server.handleClient();
+}
